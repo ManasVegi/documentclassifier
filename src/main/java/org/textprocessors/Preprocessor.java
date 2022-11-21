@@ -1,5 +1,6 @@
 package org.textprocessors;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,13 +15,10 @@ public class Preprocessor {
     private final List<String> stopWords = initializeStopWords();
     private Properties props = new Properties();
     Map<ComparableLabel, Integer> grams2, grams3;
+    Map<String, Map<String, Double>> tfIdf;
     Map<String, String> documents;
     public Preprocessor(Map<String, String> documents) {
         this.documents = documents;
-    }
-
-    public Map<String, String> getDocuments() {
-        return documents;
     }
 
     public void removeStopWords() {
@@ -52,7 +50,6 @@ public class Preprocessor {
                 cl3.setWord(w3);
                 cl3.setValue(w3);
                 cl3.setNER("3_GRAM");
-                System.out.println(cl2 + ", " + cl3);
                 ComparableLabel comparableLabel2 = new ComparableLabel(cl2), comparableLabel3 = new ComparableLabel(cl3);
                 grams2.put(comparableLabel2, grams2.getOrDefault(comparableLabel2, 0) + 1);
                 grams3.put(comparableLabel3, grams3.getOrDefault(comparableLabel3, 0) + 1);
@@ -82,7 +79,7 @@ public class Preprocessor {
         this.grams3 = grams3;
     }
 
-    public void tokenize() {
+    public void tokenizeAndCalculateTfIdf() {
         props.setProperty("annotators", "tokenize,pos,lemma,ner");
         props.setProperty("tokenize.options", "splitHyphenated=false,americanize=false");
         StanfordCoreNLP tokenizingPipeline = new StanfordCoreNLP(props);
@@ -90,14 +87,14 @@ public class Preprocessor {
 //            ngrams = StringUtils.getNgramsString(documents.get(document), 2, 3).stream().toList();
 //        }
         Map<String, List<CoreLabel>> docuTokens = new HashMap<>();
-        Map<String, List<CoreLabel>> docuNerTokens = new HashMap<>();
+        Map<String, Set<ComparableLabel>> docuNerTokens = new HashMap<>();
+        Map<String, List<CoreLabel>> allTokens = new HashMap<>();
         for (String documentName : documents.keySet()) {
             CoreDocument doc = tokenizingPipeline.processToCoreDocument(documents.get(documentName));
             // annotate
             //tokenizingPipeline.annotate(doc);
             // display tokens
-            System.out.println("Tokens for file: " + documentName);
-            System.out.println("Size: " + documents.get(documentName).length() + " #ner: " + doc.entityMentions().size());
+            allTokens.put(documentName, doc.tokens());
             for (CoreLabel tok : doc.tokens()) {
                 //System.out.println(String.format("%s\t%s\t%s", tok.word(), tok.lemma(), tok.ner()));
 
@@ -106,15 +103,51 @@ public class Preprocessor {
                     toks.add(tok);
                     docuTokens.put(documentName, toks);
                 } else {
-                    List<CoreLabel> toks = docuNerTokens.getOrDefault(documentName, new ArrayList<>());
-                    toks.add(tok);
+                    Set<ComparableLabel> toks = docuNerTokens.getOrDefault(documentName, new HashSet<>());
+                    toks.add(new ComparableLabel(tok));
                     docuNerTokens.put(documentName, toks);
                 }
 
             }
-            //docuTokens.put(document, doc.tokens());
         }
         this.createNGrams(docuTokens);
+        Map<String, Map<String, Double>> termFrequency = new HashMap<>();
+        for (String docName : allTokens.keySet()) {
+            Map<String, Double> docTF = new HashMap<>();
+            for (int i = 0; i < allTokens.get(docName).size(); i++) {
+                CoreLabel token = allTokens.get(docName).get(i);
+                CoreLabel cl2gram = new CoreLabel(token), cl3gram = new CoreLabel(token);
+                if (i < allTokens.get(docName).size() - 1)
+                    cl2gram.setWord(cl2gram.word() + " " + allTokens.get(docName).get(i + 1).word());
+                if (i < allTokens.get(docName).size() - 2)
+                    cl3gram.setWord(cl2gram.word() + " " + allTokens.get(docName).get(i + 1).word() + " " + allTokens.get(docName).get(i + 2).word());
+                if (!token.ner().equals("O")) {
+                    docTF.put(token.word(), docTF.getOrDefault(token.word(), 0d) + 1);
+                } else if (i < allTokens.get(docName).size() - 2 && grams3.containsKey(new ComparableLabel(cl3gram))) {
+                    docTF.put(cl3gram.word(), docTF.getOrDefault(cl3gram.word(), 0d) + 1);
+                    i += 2;
+                } else if (i < allTokens.size() - 1 && grams2.containsKey(new ComparableLabel(cl2gram))) {
+                    docTF.put(cl2gram.word(), docTF.getOrDefault(cl2gram.word(), 0d) + 1);
+                    i += 1;
+                } else {
+                    docTF.put(token.lemma(), docTF.getOrDefault(token.lemma(), 0d) + 1);
+                }
+            }
+            termFrequency.put(docName, docTF);
+        }
+        Map<String, Integer> documentFrequency = new HashMap<>();
+        for (String docName : termFrequency.keySet()) {
+            for (String tok : termFrequency.get(docName).keySet()) {
+                documentFrequency.put(tok, documentFrequency.getOrDefault(tok, 0) + 1);
+            }
+        }
+        for (String docName : termFrequency.keySet()) {
+            for (String tok : termFrequency.get(docName).keySet()) {
+                double idf = Math.log10((double) documents.size() / documentFrequency.get(tok));
+                termFrequency.get(docName).put(tok, termFrequency.get(docName).get(tok) * idf);
+            }
+        }
+        tfIdf = termFrequency;
     }
     private List<String> initializeStopWords() {
         Path stopWordFile = Path.of("princeton_stopwords.txt");
@@ -125,5 +158,27 @@ public class Preprocessor {
             System.err.println("Error while reading stopwords");
         }
         return stopWords;
+    }
+
+    public Map<String, Map<String, Double>> getTfIdf() {
+        return tfIdf;
+    }
+
+    public Map<String, Map<String, Double>> generateFolderTopics() {
+        Map<String, Map<String, Double>> folderTopics = new HashMap<>();
+        for (String fileName : tfIdf.keySet()) {
+            String[] path = fileName.split(File.separator);
+            String folder = path[0] + File.separator + path[1];
+            if (!folderTopics.containsKey(folder)) {
+                folderTopics.put(folder, new HashMap<>(tfIdf.get(fileName)));
+            } else {
+                Map<String, Double> cumulativeTfIdf = folderTopics.get(folder);
+                for (String keyword : tfIdf.get(fileName).keySet()) {
+                    cumulativeTfIdf.put(keyword,
+                            cumulativeTfIdf.getOrDefault(keyword, 0.0) + tfIdf.get(fileName).get(keyword));
+                }
+            }
+        }
+        return folderTopics;
     }
 }
