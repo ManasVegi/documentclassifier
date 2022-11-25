@@ -31,12 +31,24 @@ public class TextClassifier {
         unknownPreprocessor.removeStopWords();
         unknownPreprocessor.tokenizeAndCalculateTfIdf();
 
-        KNNClassifier knnClassifier = new KNNClassifier(labelledTfIdf, 3, KNNClassifier.COSINE);
-        Map<String, String> classification = new HashMap<>();
-        for (String doc : unknownPreprocessor.getTfIdf().keySet()) {
-            System.out.println(doc + "'s votes");
-            classification.put(doc, knnClassifier.classifyInputCrisp(unknownPreprocessor.getTfIdf().get(doc)));
+        //SETTING HYPERPARAMETERS
+        boolean isFuzzy = true;
+        KNNClassifier.FUZZY_M = 2;
+        int K = 5;
+
+        KNNClassifier knnClassifier = new KNNClassifier(labelledTfIdf, K, KNNClassifier.COSINE, isFuzzy);
+        if (isFuzzy) {
+            for (String doc : unknownPreprocessor.getTfIdf().keySet()) {
+                System.out.println(doc + "'s membership is");
+                System.out.println(knnClassifier.classifyInputFuzzy(unknownPreprocessor.getTfIdf().get(doc)));
+            }
+        } else {
+            Map<String, String> classification = new HashMap<>();
+            for (String doc : unknownPreprocessor.getTfIdf().keySet()) {
+                System.out.println(doc + "'s votes");
+                classification.put(doc, knnClassifier.classifyInputCrisp(unknownPreprocessor.getTfIdf().get(doc)));
+            }
+            System.out.println(classification);
         }
-        System.out.println(classification);
     }
 }

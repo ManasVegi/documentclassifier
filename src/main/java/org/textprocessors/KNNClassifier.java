@@ -10,16 +10,18 @@ import java.util.PriorityQueue;
 public class KNNClassifier {
 
     public static int EUCLIDEAN = 0;
+    public static int FUZZY_M = 2; //determines how heavily distance is weighted
     public static int COSINE = 1;
     Map<String, List<Map<String, Double>>> labelledTfIdf;
     private int similarityMeasure;
     private int K;
     boolean isFuzzy = false;
 
-    public KNNClassifier(Map<String, List<Map<String, Double>>> labelledTfIdf, int k, int similarityMeasure) {
+    public KNNClassifier(Map<String, List<Map<String, Double>>> labelledTfIdf, int k, int similarityMeasure, boolean isFuzzy) {
         this.labelledTfIdf = labelledTfIdf;
         this.K = k;
         this.similarityMeasure = similarityMeasure;
+        this.isFuzzy = isFuzzy;
     }
     private PriorityQueue<Pair<Map<String, Double>, String>> getNearestNeighbors(Map<String, Double> inputTfIdf) {
         //priority queue as a max heap
@@ -58,5 +60,28 @@ public class KNNClassifier {
         }
         return winner;
     }
-
+    public Map<String, Double> classifyInputFuzzy(Map<String, Double> inputTfIdf) {
+        PriorityQueue<Pair<Map<String, Double>, String>> nearestNeighbors = getNearestNeighbors(inputTfIdf);
+        Map<String, Double> membership = new HashMap<>();
+        //full membership for the labelled instances
+        double sumDistances = 0.0;
+        for (Pair<Map<String, Double>, String> neigh : nearestNeighbors) {
+            double dist = similarityMeasure == KNNClassifier.COSINE
+                    ? SimilarityUtil.getCosineSim(inputTfIdf, neigh.first)
+                    : SimilarityUtil.getEuclideanDist(inputTfIdf, neigh.first);
+            dist = Math.pow(dist, 2.0 / (FUZZY_M - 1));
+            String label = neigh.second;
+            if (similarityMeasure == KNNClassifier.COSINE) {
+                sumDistances += dist;
+                membership.put(label, membership.getOrDefault(label, 0.0) + dist);
+            } else {
+                sumDistances += (1 / dist);
+                membership.put(label, membership.getOrDefault(label, 0.0) + (1 / dist));
+            }
+        }
+        for (String label : membership.keySet()) {
+            membership.put(label, membership.get(label) / sumDistances);
+        }
+        return membership;
+    }
 }
