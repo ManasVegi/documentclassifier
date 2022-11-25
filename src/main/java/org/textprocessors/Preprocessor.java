@@ -14,8 +14,11 @@ public class Preprocessor {
     public static final int NGRAMS_THRESHOLD = 4;
     private final List<String> stopWords = initializeStopWords();
     private Properties props = new Properties();
+
+    private Map<String, Integer> documentFrequency;
     Map<ComparableLabel, Integer> grams2, grams3;
     Map<String, Map<String, Double>> tfIdf;
+    Map<String, Double> IDF;
     Map<String, String> documents;
     public Preprocessor(Map<String, String> documents) {
         this.documents = documents;
@@ -78,7 +81,6 @@ public class Preprocessor {
         this.grams2 = grams2;
         this.grams3 = grams3;
     }
-
     public void tokenizeAndCalculateTfIdf() {
         props.setProperty("annotators", "tokenize,pos,lemma,ner");
         props.setProperty("tokenize.options", "splitHyphenated=false,americanize=false");
@@ -135,16 +137,21 @@ public class Preprocessor {
             }
             termFrequency.put(docName, docTF);
         }
-        Map<String, Integer> documentFrequency = new HashMap<>();
-        for (String docName : termFrequency.keySet()) {
-            for (String tok : termFrequency.get(docName).keySet()) {
-                documentFrequency.put(tok, documentFrequency.getOrDefault(tok, 0) + 1);
+        if (documentFrequency == null) {
+            documentFrequency = new HashMap<>();
+            for (String docName : termFrequency.keySet()) {
+                for (String tok : termFrequency.get(docName).keySet()) {
+                    documentFrequency.put(tok, documentFrequency.getOrDefault(tok, 0) + 1);
+                }
             }
         }
         for (String docName : termFrequency.keySet()) {
             for (String tok : termFrequency.get(docName).keySet()) {
-                double idf = Math.log10((double) documents.size() / documentFrequency.get(tok));
-                termFrequency.get(docName).put(tok, termFrequency.get(docName).get(tok) * idf);
+                //ignore terms that were not previously tokenized in the labelled set
+                if (documentFrequency.containsKey(tok)) {
+                    double idf = Math.log10((double) documents.size() / documentFrequency.get(tok));
+                    termFrequency.get(docName).put(tok, termFrequency.get(docName).get(tok) * idf);
+                }
             }
         }
         tfIdf = termFrequency;
@@ -181,4 +188,13 @@ public class Preprocessor {
         }
         return folderTopics;
     }
+
+    public Map<String, Integer> getDocumentFrequency() {
+        return documentFrequency;
+    }
+
+    public void setDocumentFrequency(Map<String, Integer> documentFrequency) {
+        this.documentFrequency = documentFrequency;
+    }
+
 }
